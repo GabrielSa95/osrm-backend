@@ -1,0 +1,62 @@
+name: POC osrm-routed Windows x64
+
+on:
+  workflow_dispatch:
+
+env:
+  VCPKG_COMMIT_ID: d015e31e90838a4c9dfa3eed45979bc70d9357fc
+
+jobs:
+  build-windows-routed:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Move temp directory to D drive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'D:\Temp' -Force | Out-Null
+          'TMP=D:\Temp'  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          'TEMP=D:\Temp' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - run: cmake --version
+
+      - name: Enable vcpkg binary cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-bincache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-x64-windows-static-md-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ runner.arch }}-x64-windows-static-md-${{ env.VCPKG_COMMIT_ID }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure (mesmo preset oficial ci-windows)
+        shell: bash
+        run: cmake --preset ci-windows
+
+      - name: Build so o alvo osrm-routed
+        shell: bash
+        run: cmake --build --preset ci-windows --target osrm-routed
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Coletar exe + dependencias
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifact -Force | Out-Null
+          $exe = Get-ChildItem -Path build -Recurse -Filter osrm-routed.exe | Select-Object -First 1
+          Copy-Item $exe.FullName artifact/
+          dumpbin /dependents $exe.FullName | Out-File artifact/dependents.txt
+          Get-ChildItem $exe.DirectoryName | Out-File artifact/build_dir_listing.txt
+          "{0} bytes" -f $exe.Length | Out-File artifact/tamanho.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: osrm-routed-windows-x64-v26.9.0
+          path: artifact/**
+          if-no-files-found: error
